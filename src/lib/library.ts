@@ -120,3 +120,30 @@ export async function addItem(result: SearchResult): Promise<void> {
     ],
   );
 }
+
+/** The fields the user can edit on a saved item. */
+export type ItemChanges = Partial<Pick<LibraryItem, "status" | "rating" | "favorite" | "notes">>;
+const EDITABLE_COLUMNS = ["status", "rating", "favorite", "notes"];
+
+/** Saves the user's edits (status, rating, favorite, notes) for one item. */
+export async function updateItem(id: number, changes: ItemChanges): Promise<void> {
+  if (!isTauri()) {
+    return lsWrite(lsRead().map((i) => (i.id === id ? { ...i, ...changes } : i)));
+  }
+  // Build "SET status = $1, rating = $2 ..." from only the fields that changed.
+  // Column names can't be bound like values, so only known columns get through.
+  const entries = Object.entries(changes)
+    .filter(([key]) => EDITABLE_COLUMNS.includes(key))
+    .map(([key, value]) => (key === "favorite" ? [key, value ? 1 : 0] : [key, value]));
+  if (entries.length === 0) return;
+  const setClause = entries.map(([key], n) => `${key} = $${n + 1}`).join(", ");
+  await (await getDb()).execute(`UPDATE items SET ${setClause} WHERE id = $${entries.length + 1}`, [
+    ...entries.map(([, value]) => value),
+    id,
+  ]);
+}
+
+export async function removeItem(id: number): Promise<void> {
+  if (!isTauri()) return lsWrite(lsRead().filter((i) => i.id !== id));
+  await (await getDb()).execute("DELETE FROM items WHERE id = $1", [id]);
+}

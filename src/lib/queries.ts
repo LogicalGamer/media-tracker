@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSettings, saveSettings, type Settings } from "@/lib/settings";
-import { addItem, listItems } from "@/lib/library";
+import { addItem, listItems, removeItem, updateItem, type ItemChanges, type LibraryItem } from "@/lib/library";
 import { searchMovies } from "@/lib/api/tmdb";
 import { searchGames } from "@/lib/api/igdb";
 import { PROXY } from "@/lib/api/proxy";
@@ -31,6 +31,34 @@ export function useAddItem() {
     mutationFn: (result: SearchResult) => addItem(result),
     // refetch the library so the new item shows up
     onSuccess: (_, result) => qc.invalidateQueries({ queryKey: ["library", result.type] }),
+  });
+}
+
+/**
+ * Saves edits to one item. The cached library is updated right away
+ * ("optimistic update") so the UI feels instant; if saving fails we roll back.
+ */
+export function useUpdateItem(type: MediaType) {
+  const qc = useQueryClient();
+  const key = ["library", type];
+  return useMutation({
+    mutationFn: ({ id, changes }: { id: number; changes: ItemChanges }) => updateItem(id, changes),
+    onMutate: async ({ id, changes }) => {
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<LibraryItem[]>(key);
+      qc.setQueryData<LibraryItem[]>(key, (items) => items?.map((i) => (i.id === id ? { ...i, ...changes } : i)));
+      return { previous };
+    },
+    onError: (_err, _vars, context) => qc.setQueryData(key, context?.previous),
+    onSettled: () => qc.invalidateQueries({ queryKey: key }),
+  });
+}
+
+export function useRemoveItem(type: MediaType) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => removeItem(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["library", type] }),
   });
 }
 

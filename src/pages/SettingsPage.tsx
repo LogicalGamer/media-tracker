@@ -158,7 +158,7 @@ function KeyCard({ title, fields, help, helpUrl, settings, validate }: KeyCardPr
             </span>
           )}
         </div>
-        <Button type="submit" disabled={check.state === "checking"} className="shrink-0 bg-brand text-white hover:bg-brand/85">
+        <Button type="submit" disabled={check.state === "checking"} className="shrink-0">
           Save & test
         </Button>
       </div>

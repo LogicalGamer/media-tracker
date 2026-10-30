@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { ArrowLeft, ImageOff, Plus, Settings } from "lucide-react";
+import { ArrowLeft, FileDown, Heart, ImageOff, NotebookPen, Plus, Settings, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AddDialog } from "@/components/library/AddDialog";
+import { ItemDialog } from "@/components/library/ItemDialog";
+import { ExportDialog } from "@/components/library/ExportDialog";
 import { useLibrary } from "@/lib/queries";
 import type { MediaType } from "@/lib/api/types";
 import type { LibraryItem } from "@/lib/library";
@@ -17,6 +19,8 @@ export function LibraryPage({ type }: { type: MediaType }) {
   const navigate = useNavigate();
   const rootRef = useRef<HTMLElement>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const library = useLibrary(type);
 
   useGSAP(() => {
@@ -28,6 +32,7 @@ export function LibraryPage({ type }: { type: MediaType }) {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        setSelectedId(null); // close an open item first
         setAddOpen(true);
       } else if (e.key === "Escape" && !e.defaultPrevented) {
         // defaultPrevented = an open dialog already used this Esc to close itself
@@ -39,6 +44,8 @@ export function LibraryPage({ type }: { type: MediaType }) {
   }, [navigate]);
 
   const items = library.data ?? [];
+  // look the item up by id so the dialog always shows the latest saved values
+  const selected = items.find((i) => i.id === selectedId) ?? null;
 
   return (
     <main ref={rootRef} className="flex h-svh flex-col bg-background">
@@ -55,6 +62,14 @@ export function LibraryPage({ type }: { type: MediaType }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => setExportOpen(true)}
+            disabled={items.length === 0}
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <FileDown /> Export PDF
+          </Button>
           <Button variant="ghost" size="icon" asChild aria-label="Settings">
             <Link to="/settings">
               <Settings />
@@ -72,46 +87,67 @@ export function LibraryPage({ type }: { type: MediaType }) {
         ) : (
           <ul className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-x-6 gap-y-8">
             {items.map((item) => (
-              <CoverCard key={item.id} item={item} />
+              <CoverCard key={item.id} item={item} onOpen={() => setSelectedId(item.id)} />
             ))}
           </ul>
         )}
       </section>
 
       <AddDialog type={type} open={addOpen} onOpenChange={setAddOpen} />
+      <ItemDialog item={selected} onClose={() => setSelectedId(null)} />
+      <ExportDialog type={type} items={items} open={exportOpen} onOpenChange={setExportOpen} />
     </main>
   );
 }
 
 function AddButton({ noun, onClick }: { noun: string; onClick: () => void }) {
   return (
-    <Button onClick={onClick} className="h-10 gap-2 bg-brand px-4 text-white hover:bg-brand/85">
+    // Off-white on black matches the monochrome style; red stays an accent (stars, hearts, hover rings).
+    <Button onClick={onClick} className="h-10 gap-2 px-4 hover:bg-white">
       <Plus />
       Add {noun}
-      <kbd className="ml-1 rounded bg-black/25 px-1.5 py-0.5 font-mono text-[10px]">Ctrl K</kbd>
+      <kbd className="ml-1 rounded bg-black/10 px-1.5 py-0.5 font-mono text-[10px] text-black/60">Ctrl K</kbd>
     </Button>
   );
 }
 
-function CoverCard({ item }: { item: LibraryItem }) {
+function CoverCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
   return (
-    <li className="group">
-      <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-muted ring-1 ring-white/5 transition duration-300 group-hover:-translate-y-1 group-hover:ring-brand/60">
-        {item.posterUrl ? (
-          <img
-            src={item.posterUrl}
-            alt=""
-            loading="lazy"
-            className="size-full object-cover transition duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex size-full items-center justify-center text-muted-foreground">
-            <ImageOff />
-          </div>
-        )}
-      </div>
-      <p className="mt-3 truncate text-sm font-medium">{item.title}</p>
-      <p className="truncate text-xs text-muted-foreground">{[item.year, item.status].filter(Boolean).join(" · ")}</p>
+    <li>
+      <button onClick={onOpen} className="group w-full text-left outline-none" aria-label={`Open ${item.title}`}>
+        <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-muted ring-1 ring-white/5 transition duration-300 group-hover:-translate-y-1 group-hover:ring-brand/60 group-focus-visible:ring-2 group-focus-visible:ring-brand">
+          {item.posterUrl ? (
+            <img
+              src={item.posterUrl}
+              alt=""
+              loading="lazy"
+              className="size-full object-cover transition duration-500 group-hover:scale-105"
+            />
+          ) : (
+            <div className="flex size-full items-center justify-center text-muted-foreground">
+              <ImageOff />
+            </div>
+          )}
+
+          {/* Personal info badges over the cover */}
+          {item.favorite && (
+            <Heart className="absolute top-2 right-2 size-5 fill-brand text-brand drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]" />
+          )}
+          {(item.rating !== null || item.notes) && (
+            <div className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-gradient-to-t from-black/90 to-transparent px-2.5 pt-8 pb-2">
+              {item.rating !== null && (
+                <span className="flex items-center gap-1 font-display text-lg leading-none">
+                  <Star className="size-4 fill-brand text-brand" />
+                  {item.rating}
+                </span>
+              )}
+              {item.notes && <NotebookPen className="ml-auto size-4 text-white/70" aria-label="Has comments" />}
+            </div>
+          )}
+        </div>
+        <p className="mt-3 truncate text-sm font-medium">{item.title}</p>
+        <p className="truncate text-xs text-muted-foreground">{[item.year, item.status].filter(Boolean).join(" · ")}</p>
+      </button>
     </li>
   );
 }

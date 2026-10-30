@@ -52,3 +52,14 @@ export const getJson = <T>(url: string, headers: Record<string, string> = {}) =>
 
 export const postJson = <T>(url: string, body: string, headers: Record<string, string> = {}) =>
   requestJson<T>(url, { method: "POST", body, headers });
+
+/** Downloads a file (e.g. a cover image) as raw bytes. Returns null if it fails. */
+export async function fetchBytes(url: string): Promise<{ bytes: Uint8Array; type: string } | null> {
+  try {
+    const res = await doFetch(url);
+    if (!res.ok) return null;
+    return { bytes: new Uint8Array(await res.arrayBuffer()), type: res.headers.get("content-type") ?? "" };
+  } catch {
+    return null;
+  }
+}

@@ -173,7 +173,7 @@ function MissingKey({ api, onClose }: { api: string; onClose: () => void }) {
     <Message icon={<KeyRound />}>
       <span className="block">Add your {api} key in Settings to search.</span>
       <Button
-        className="mt-4 bg-brand text-white hover:bg-brand/85"
+        className="mt-4"
         onClick={() => {
           onClose();
           navigate("/settings");
