@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { measureGlyph, type GlyphBox } from "@/lib/glyph-metrics";
+import { MEASURE_FONT_SIZE, measureGlyph, type GlyphBox } from "@/lib/glyph-metrics";
+import { cn } from "@/lib/utils";
 
 gsap.registerPlugin(useGSAP);
 
@@ -39,11 +40,6 @@ type Props = {
   className?: string;
 };
 
-/** Builds the SVG transform that stretches one glyph to fill the box (x, y, w, h). */
-function fitTransform(g: GlyphBox, x: number, y: number, w: number, h: number) {
-  return `translate(${x} ${y}) scale(${w / g.width} ${h / g.height}) translate(${g.left} ${g.ascent})`;
-}
-
 /** Places the letter columns side by side, separated by LETTER_GAP. */
 function computeColumns(baseWidths: number[]): Column[] {
   let x = 0;
@@ -54,23 +50,35 @@ function computeColumns(baseWidths: number[]): Column[] {
   });
 }
 
-/** The 3 transforms (top, middle, bottom copy) for letter `i`. */
-function letterTransforms(g: GlyphBox, i: number, col: Column, t: number) {
+/**
+ * Where the 3 copies (top, middle, bottom) of letter `i` sit right now, as
+ * [top edge, height] pairs in SVG units.
+ */
+function letterBoxes(i: number, t: number): [number, number][] {
   // Every other letter runs in the opposite direction, like the "I" in the reference.
   const p = i % 2 ? 1 - t : t;
   const h1 = LARGE + (SMALL - LARGE) * p;
   const h3 = SMALL + (LARGE - SMALL) * p;
   return [
-    fitTransform(g, col.x, 0, col.w, h1),
-    fitTransform(g, col.x, h1 + GAP, col.w, MID),
-    fitTransform(g, col.x, h1 + GAP + MID + GAP, col.w, h3),
+    [0, h1],
+    [h1 + GAP, MID],
+    [h1 + GAP + MID + GAP, h3],
   ];
 }
 
+/**
+ * CSS transform that moves/squashes one copy into its box. Each copy is drawn
+ * once at the LARGE height and only ever shrunk, so it stays sharp. Changing a
+ * transform is done by the graphics card; re-drawing text every frame was
+ * done by the CPU and stuttered in the Linux app (WebKitGTK).
+ */
+const copyTransform = ([top, height]: [number, number]) =>
+  `translateY(${(top / LARGE) * 100}%) scaleY(${height / LARGE})`;
+
 export function StretchWord({ word, fast = false, introDelay = 0, className }: Props) {
-  const svgRef = useRef<SVGSVGElement>(null);
-  // textRefs.current[letter][copy] -> the <text> element to transform
-  const textRefs = useRef<(SVGTextElement | null)[][]>([]);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // copyRefs.current[letter][copy] -> the layer to transform
+  const copyRefs = useRef<(HTMLDivElement | null)[][]>([]);
   const tweens = useRef<gsap.core.Tween[]>([]);
   const [glyphs, setGlyphs] = useState<GlyphBox[] | null>(null);
 
@@ -99,7 +107,7 @@ export function StretchWord({ word, fast = false, introDelay = 0, className }: P
   useGSAP(
     () => {
       if (!glyphs) return;
-      const letters = svgRef.current!.querySelectorAll(".stretch-letter");
+      const letters = rootRef.current!.querySelectorAll(".stretch-letter");
 
       // Intro: the columns rise and fade in one after another.
       gsap.from(letters, {
@@ -113,10 +121,11 @@ export function StretchWord({ word, fast = false, introDelay = 0, className }: P
 
       // Every frame: turn the animated numbers into transforms and write them to the DOM.
       const render = () => {
-        glyphs.forEach((g, i) =>
-          letterTransforms(g, i, columns[i], states[i].t).forEach((tf, k) =>
-            textRefs.current[i][k]?.setAttribute("transform", tf),
-          ),
+        states.forEach((state, i) =>
+          letterBoxes(i, state.t).forEach((box, k) => {
+            const el = copyRefs.current[i]?.[k];
+            if (el) el.style.transform = copyTransform(box);
+          }),
         );
       };
       gsap.ticker.add(render);
@@ -140,7 +149,7 @@ export function StretchWord({ word, fast = false, introDelay = 0, className }: P
 
       return () => gsap.ticker.remove(render);
     },
-    { scope: svgRef, dependencies: [glyphs] },
+    { scope: rootRef, dependencies: [glyphs] },
   );
 
   // Smoothly change speed when `fast` toggles (GSAP can tween a tween's timeScale).
@@ -153,34 +162,41 @@ export function StretchWord({ word, fast = false, introDelay = 0, className }: P
 
   if (!glyphs) return <div className={className} />;
 
+  // Positions as percentages of the whole word, so it scales with the window.
+  const pctX = (v: number) => `${(v / totalWidth) * 100}%`;
+
   return (
-    <svg
-      ref={svgRef}
-      viewBox={`0 0 ${totalWidth} ${COLUMN_HEIGHT}`}
-      className={className}
-      fill="currentColor"
+    <div
+      ref={rootRef}
+      className={cn("relative", className)}
+      style={{ aspectRatio: `${totalWidth} / ${COLUMN_HEIGHT}` }}
       aria-hidden
     >
       {glyphs.map((g, i) => {
-        textRefs.current[i] ??= [];
+        copyRefs.current[i] ??= [];
         return (
-          <g key={i} className="stretch-letter">
-            {letterTransforms(g, i, columns[i], states[i].t).map((tf, k) => (
-              <text
+          <div key={i} className="stretch-letter absolute inset-y-0" style={{ left: pctX(columns[i].x), width: pctX(columns[i].w) }}>
+            {letterBoxes(i, states[i].t).map((box, k) => (
+              <div
                 key={k}
                 ref={(el) => {
-                  textRefs.current[i][k] = el;
+                  copyRefs.current[i][k] = el;
                 }}
-                transform={tf}
-                fontFamily={FONT}
-                fontSize={100}
+                // will-change: give each copy its own GPU layer
+                className="absolute inset-x-0 top-0 origin-top will-change-transform"
+                style={{ height: `${(LARGE / COLUMN_HEIGHT) * 100}%`, transform: copyTransform(box) }}
               >
-                {word[i]}
-              </text>
+                {/* The glyph's ink stretched to fill the layer; drawn once, never changed */}
+                <svg viewBox={`0 0 ${g.width} ${g.height}`} preserveAspectRatio="none" className="block size-full" fill="currentColor">
+                  <text x={g.left} y={g.ascent} fontFamily={FONT} fontSize={MEASURE_FONT_SIZE}>
+                    {word[i]}
+                  </text>
+                </svg>
+              </div>
             ))}
-          </g>
+          </div>
         );
       })}
-    </svg>
+    </div>
   );
 }

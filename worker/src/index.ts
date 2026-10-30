@@ -16,6 +16,7 @@ export interface Env {
   IGDB_CLIENT_ID: string;
   IGDB_CLIENT_SECRET: string;
   APP_KEY: string; // shared password the app sends
+  LIMITER: { limit(options: { key: string }): Promise<{ success: boolean }> }; // see wrangler.jsonc
 }
 
 // Only these upstream paths can be reached, so the Worker can't be used as a general proxy.
@@ -29,6 +30,13 @@ export default {
 
     if (request.headers.get("X-App-Key") !== env.APP_KEY) {
       return withCors(json({ error: "unauthorized" }, 401));
+    }
+
+    // Per-person limit, counted by IP address. 429 is the status the app already
+    // understands: it waits a little and tries again.
+    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+    if (!(await env.LIMITER.limit({ key: ip })).success) {
+      return withCors(json({ error: "too many requests" }, 429));
     }
 
     const url = new URL(request.url);

@@ -19,7 +19,21 @@ type IgdbGame = {
   cover?: { image_id: string };
   genres?: { name: string }[];
   platforms?: { name: string; abbreviation?: string }[];
+  involved_companies?: { developer: boolean; company: { name: string } }[];
+  total_rating_count?: number; // how many people rated it: a good sign of a real, known game
 };
+
+// IGDB "game types" worth showing: main game, expansion, standalone expansion,
+// remake, remaster, expanded game. Leaves out DLC, bundles, mods, seasons, ports...
+const GAME_TYPES = "(0,2,4,8,9,10)";
+
+/** The studios that made the game (IGDB also lists publishers, porting studios, ...). */
+const developersOf = (g: IgdbGame) =>
+  g.involved_companies?.filter((c) => c.developer).map((c) => c.company.name) ?? [];
+
+/** With own keys: straight to IGDB. Without (null): through our shared server. */
+const runQuery = <T>(body: string, creds: IgdbCredentials | null) =>
+  creds ? igdbQuery<T>("games", body, creds) : postJson<T>(`${PROXY!.url}/igdb/games`, body, proxyHeaders());
 
 // The token is kept in memory and reused until it's about to expire.
 // Getting a new one is a single cheap request, so we don't bother saving it to disk.
@@ -62,12 +76,14 @@ export async function searchGames(query: string, creds: IgdbCredentials | null):
   // `version_parent = null` hides duplicate editions (GOTY, Deluxe, ...).
   const q = query.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
   const body = `search "${q}";
-     fields name, first_release_date, cover.image_id, genres.name, platforms.name, platforms.abbreviation;
-     where version_parent = null;
-     limit 20;`;
-  const games = creds
-    ? await igdbQuery<IgdbGame[]>("games", body, creds)
-    : await postJson<IgdbGame[]>(`${PROXY!.url}/igdb/games`, body, proxyHeaders());
+     fields name, first_release_date, cover.image_id, genres.name, platforms.name, platforms.abbreviation,
+            involved_companies.developer, involved_companies.company.name, total_rating_count;
+     where version_parent = null & game_type = ${GAME_TYPES};
+     limit 30;`;
+  const games = await runQuery<IgdbGame[]>(body, creds);
+  // Most-rated first: well-known games rise to the top and fan-made projects sink.
+  // (sort is stable, so games with equal counts keep IGDB's relevance order)
+  games.sort((a, b) => (b.total_rating_count ?? 0) - (a.total_rating_count ?? 0));
   return games.map((g) => ({
     source: "igdb",
     externalId: String(g.id),
@@ -77,7 +93,17 @@ export async function searchGames(query: string, creds: IgdbCredentials | null):
     posterUrl: g.cover ? `${COVER_URL}/${g.cover.image_id}.jpg` : null,
     genres: g.genres?.map((x) => x.name) ?? [],
     platforms: g.platforms?.map((p) => p.abbreviation ?? p.name) ?? [],
+    developers: developersOf(g),
   }));
+}
+
+/** Developers for several saved games in one request (IGDB allows ~4 requests/second). Keyed by game id. */
+export async function getGameDevelopers(ids: string[], creds: IgdbCredentials | null): Promise<Map<string, string[]>> {
+  const body = `fields involved_companies.developer, involved_companies.company.name;
+     where id = (${ids.map(Number).join(",")});
+     limit 500;`;
+  const games = await runQuery<IgdbGame[]>(body, creds);
+  return new Map(games.map((g) => [String(g.id), developersOf(g)]));
 }
 
 /** Throws an ApiError if the credentials don't work. */

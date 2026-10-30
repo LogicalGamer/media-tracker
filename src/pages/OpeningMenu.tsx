@@ -61,7 +61,6 @@ export function OpeningMenu() {
     gsap.to(rootRef.current, {
       opacity: 0,
       scale: 1.04,
-      filter: "blur(10px)",
       duration: 0.5,
       ease: "power2.in",
       onComplete: () => navigate(`/${id}`),
@@ -113,16 +112,16 @@ export function OpeningMenu() {
               aria-label={`Open ${o.label}`}
               className={cn(
                 "group relative flex flex-col items-center gap-6 outline-none",
-                "text-neutral-200 transition-colors duration-500 ease-out",
+                "text-foreground/90 transition-colors duration-500 ease-out",
                 // the active word sits in front so it can cover the other one
                 isActive && "z-10 text-brand",
-                isDimmed && "text-neutral-900",
+                isDimmed && "text-foreground/10",
               )}
             >
-              {/* Soft glow behind the hovered word */}
+              {/* Soft glow behind the hovered word. A gradient, not a blur filter: big blurs are very slow on Linux */}
               <span
                 className={cn(
-                  "pointer-events-none absolute inset-0 -z-10 scale-125 rounded-full bg-brand/15 blur-3xl transition-opacity duration-700",
+                  "pointer-events-none absolute inset-0 -z-10 scale-150 bg-[radial-gradient(closest-side,rgb(255_60_56/0.16),transparent)] transition-opacity duration-700",
                   isActive ? "opacity-100" : "opacity-0",
                 )}
               />
@@ -157,7 +156,7 @@ export function OpeningMenu() {
         })}
       </nav>
 
-      <footer className="menu-fade px-10 pb-8 text-center text-[11px] tracking-[0.2em] text-neutral-600 uppercase">
+      <footer className="menu-fade px-10 pb-8 text-center text-[11px] tracking-[0.2em] text-muted-foreground/70 uppercase">
         Hover to preview · Click or press 1 / 2 to enter
       </footer>
     </main>

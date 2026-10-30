@@ -1,6 +1,6 @@
 import { getJson } from "@/lib/http";
 import { PROXY, proxyHeaders } from "./proxy";
-import { yearOf, type SearchResult } from "./types";
+import { yearOf, type Credits, type SearchResult } from "./types";
 
 // TMDB docs: https://developer.themoviedb.org
 const BASE = "https://api.themoviedb.org/3";
@@ -65,6 +65,40 @@ export async function searchMovies(query: string, token: string): Promise<Search
     posterUrl: m.poster_path ? `${base}w342${m.poster_path}` : null,
     genres: m.genre_ids.map((id) => genres.get(id)).filter((g): g is string => !!g),
   }));
+}
+
+type TmdbCrew = { name: string; job: string };
+type TmdbMovieDetails = {
+  title: string;
+  release_date?: string;
+  poster_path: string | null;
+  genres: { name: string }[];
+  credits: { crew: TmdbCrew[] };
+};
+
+/** Up-to-date info for one saved movie (used to fill in and refresh the library). */
+export type MovieDetails = Pick<SearchResult, "title" | "year" | "posterUrl" | "genres"> & Credits;
+
+/**
+ * Current details of one movie, including its directors and soundtrack composers.
+ * Search results don't include the crew, so this asks for the movie with its credits attached.
+ */
+export async function getMovieDetails(id: string, token: string): Promise<MovieDetails> {
+  const [m, base] = await Promise.all([
+    tmdbGet<TmdbMovieDetails>(`/movie/${id}?append_to_response=credits`, token),
+    getImageBase(token),
+  ]);
+  const namesFor = (jobs: string[]) => [
+    ...new Set(m.credits.crew.filter((c) => jobs.includes(c.job)).map((c) => c.name)), // Set: no duplicates
+  ];
+  return {
+    title: m.title,
+    year: yearOf(m.release_date),
+    posterUrl: m.poster_path ? `${base}w342${m.poster_path}` : null,
+    genres: m.genres.map((g) => g.name),
+    directors: namesFor(["Director"]),
+    composers: namesFor(["Original Music Composer", "Music"]),
+  };
 }
 
 /** Throws an ApiError if the token doesn't work. */

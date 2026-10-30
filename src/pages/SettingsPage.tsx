@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, Loader2, XCircle } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, CheckCircle2, Download, Eye, EyeOff, Loader2, Moon, Sun, Upload, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,6 +13,11 @@ import { validateIgdb } from "@/lib/api/igdb";
 import { ApiError } from "@/lib/http";
 import { PROXY } from "@/lib/api/proxy";
 import type { Settings } from "@/lib/settings";
+import { listAllItems, restoreItems } from "@/lib/library";
+import { createBackup, readBackup } from "@/lib/backup";
+import { openTextFile, saveFile } from "@/lib/save-file";
+import { useTheme, type Theme } from "@/lib/theme";
+import { cn } from "@/lib/utils";
 
 export function SettingsPage() {
   const navigate = useNavigate();
@@ -66,8 +72,136 @@ export function SettingsPage() {
             />
           </div>
         )}
+
+        <SectionTitle>Library backup</SectionTitle>
+        <BackupCard />
+
+        <SectionTitle>Appearance</SectionTitle>
+        <ThemeCard />
+
+        <SectionTitle>About</SectionTitle>
+        <AboutCard />
       </div>
     </main>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h2 className="mt-12 mb-4 text-xs tracking-[0.25em] text-muted-foreground uppercase">{children}</h2>;
+}
+
+/** Save the whole library to a JSON file, or load one back (nothing is ever deleted by loading). */
+function BackupCard() {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const filter = { name: "Media Tracker backup", extensions: ["json"] };
+
+  const backUp = async () => {
+    setBusy(true);
+    try {
+      const items = await listAllItems();
+      const date = new Date().toISOString().slice(0, 10); // 2026-10-30
+      const path = await saveFile(`media-tracker-backup-${date}.json`, new TextEncoder().encode(createBackup(items)), filter);
+      if (path) toast.success(`Backed up ${items.length} item${items.length === 1 ? "" : "s"}`, { description: path });
+    } catch (e) {
+      console.error(e);
+      toast.error("Couldn't save the backup");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const restore = async () => {
+    setBusy(true);
+    try {
+      const text = await openTextFile(filter);
+      if (text === null) return; // cancelled
+      const { items, skipped } = readBackup(text);
+      const { added, updated } = await restoreItems(items);
+      await qc.invalidateQueries({ queryKey: ["library"] });
+      toast.success("Backup restored", {
+        description: `${added} added, ${updated} updated${skipped ? `, ${skipped} damaged entries skipped` : ""}`,
+      });
+    } catch (e) {
+      console.error(e);
+      toast.error("Couldn't restore", { description: e instanceof Error ? e.message : undefined });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card/40 p-5">
+      <p className="text-sm text-muted-foreground">
+        Saves all your movies and games, with ratings and comments, to one file. Restore it on a new computer or
+        after reinstalling. Restoring adds what's missing and updates what you already have; it never deletes anything.
+      </p>
+      <div className="mt-4 flex gap-2">
+        <Button onClick={backUp} disabled={busy}>
+          <Download /> Back up library
+        </Button>
+        <Button variant="outline" onClick={restore} disabled={busy}>
+          <Upload /> Restore from file
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ThemeCard() {
+  const [theme, setTheme] = useTheme();
+  const options: { value: Theme; label: string; icon: React.ReactNode }[] = [
+    { value: "dark", label: "Dark", icon: <Moon /> },
+    { value: "light", label: "Light", icon: <Sun /> },
+  ];
+  return (
+    <div className="flex gap-2">
+      {options.map((o) => (
+        <button
+          key={o.value}
+          onClick={() => setTheme(o.value)}
+          aria-pressed={theme === o.value}
+          className={cn(
+            "flex items-center gap-2 rounded-full border px-4 py-2 text-sm transition-colors [&_svg]:size-4",
+            theme === o.value
+              ? "border-foreground bg-foreground text-background"
+              : "border-border text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {o.icon}
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AboutCard() {
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card/40 p-5 text-sm">
+      <div className="flex items-baseline justify-between">
+        <span className="font-display text-2xl tracking-wide uppercase">Media Tracker</span>
+        <span className="text-xs text-muted-foreground">Version {__APP_VERSION__}</span>
+      </div>
+      <p className="text-muted-foreground">
+        Movie data from{" "}
+        <ExternalLink href="https://www.themoviedb.org" className="text-foreground">
+          TMDB
+        </ExternalLink>
+        . This product uses the TMDB API but is not endorsed or certified by TMDB.
+      </p>
+      <p className="text-muted-foreground">
+        Game data from{" "}
+        <ExternalLink href="https://www.igdb.com" className="text-foreground">
+          IGDB.com
+        </ExternalLink>
+        .
+      </p>
+      <p className="text-xs text-muted-foreground/70">
+        Your library is stored only on this computer. Movie details are refreshed from TMDB when they're older than
+        6 months.
+      </p>
+    </div>
   );
 }
 

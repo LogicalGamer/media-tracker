@@ -7,6 +7,7 @@ import { Document, Font, Image, Page, Path, Polygon, StyleSheet, Svg, Text, View
 import antonUrl from "@fontsource/anton/files/anton-latin-400-normal.woff?url";
 import { fetchBytes } from "@/lib/http";
 import type { LibraryItem } from "@/lib/library";
+import { sortItems, type SortKey } from "@/lib/filters";
 
 Font.register({ family: "Anton", src: antonUrl });
 // Don't hyphenate words when wrapping (titles looked odd split as "Run-ner").
@@ -18,7 +19,7 @@ export type ExportOptions = {
   title: string;
   includeComments: boolean;
   onlyFavorites: boolean;
-  sortBy: "added" | "rating" | "title";
+  sortBy: SortKey;
 };
 
 /** Returns the finished PDF file as bytes. */
@@ -31,14 +32,6 @@ export async function renderLibraryPdf(items: LibraryItem[], options: ExportOpti
   const covers = await Promise.all(chosen.map((i) => loadCover(i.posterUrl)));
   const blob = await pdf(<LibraryDocument items={chosen} covers={covers} options={options} />).toBlob();
   return new Uint8Array(await blob.arrayBuffer());
-}
-
-function sortItems(items: LibraryItem[], sortBy: ExportOptions["sortBy"]) {
-  const copy = [...items];
-  if (sortBy === "title") copy.sort((a, b) => a.title.localeCompare(b.title));
-  if (sortBy === "rating") copy.sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1));
-  if (sortBy === "added") copy.sort((a, b) => b.addedAt.localeCompare(a.addedAt));
-  return copy;
 }
 
 /** Downloads a cover and turns it into a "data:" URL the PDF can embed. Only JPG/PNG are supported. */

@@ -3,12 +3,16 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
 import process from "node:process";
+import pkg from "./package.json";
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
   plugins: [react(), tailwindcss()],
+
+  // The app's version (from package.json, which tauri.conf.json also reads), shown on the Settings page
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
 
   // "@/..." points to "src/..." (used by shadcn/ui and our own imports)
   resolve: {

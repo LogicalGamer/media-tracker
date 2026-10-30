@@ -1,8 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getSettings, saveSettings, type Settings } from "@/lib/settings";
-import { addItem, listItems, removeItem, updateItem, type ItemChanges, type LibraryItem } from "@/lib/library";
-import { searchMovies } from "@/lib/api/tmdb";
-import { searchGames } from "@/lib/api/igdb";
+import {
+  addItem,
+  listItems,
+  removeItem,
+  saveDetails,
+  updateItem,
+  type ItemChanges,
+  type LibraryItem,
+} from "@/lib/library";
+import { ApiError } from "@/lib/http";
+import { getMovieDetails, searchMovies } from "@/lib/api/tmdb";
+import { getGameDevelopers, searchGames, type IgdbCredentials } from "@/lib/api/igdb";
 import { PROXY } from "@/lib/api/proxy";
 import type { MediaType, SearchResult } from "@/lib/api/types";
 
@@ -67,22 +76,74 @@ export function useRemoveItem(type: MediaType) {
  * set, otherwise the shared server. Needs at least 2 characters.
  */
 export function useSearch(type: MediaType, query: string, settings: Settings | undefined) {
-  // own IGDB keys if entered, otherwise null = use the shared server
-  const igdbCreds = hasOwnKeys("game", settings)
-    ? { clientId: settings!.igdbClientId, clientSecret: settings!.igdbClientSecret }
-    : null;
   return useQuery({
     queryKey: ["search", type, query],
-    queryFn: () => (type === "movie" ? searchMovies(query, settings!.tmdbToken) : searchGames(query, igdbCreds)),
+    queryFn: () =>
+      type === "movie" ? searchMovies(query, settings!.tmdbToken) : searchGames(query, igdbCredentials(settings)),
     enabled: hasKeysFor(type, settings) && query.trim().length >= 2,
     staleTime: 10 * 60 * 1000, // reuse the same search for 10 min instead of asking the API again
     retry: false, // requestJson already retries rate limits
   });
 }
 
+// TMDB's terms ask apps not to keep cached data longer than 6 months.
+const SIX_MONTHS = 182 * 24 * 60 * 60 * 1000;
+
+/**
+ * True when an item needs downloading again: its directors/composers (movies)
+ * or developers (games) were never looked up, or it's a movie whose TMDB data
+ * is older than 6 months.
+ */
+export const needsDetails = (item: LibraryItem) =>
+  item.type === "movie"
+    ? item.extra.directors === undefined || Date.now() - Date.parse(item.fetchedAt) > SIX_MONTHS
+    : item.extra.developers === undefined;
+
+/**
+ * Downloads details for the items that need them (see needsDetails): movies
+ * right after being added, items saved before the filters existed, and movies
+ * due for their 6-month refresh. Runs in the background while the library is open. It uses useQuery only so
+ * the same batch isn't fetched twice; it returns nothing useful itself.
+ */
+export function useFillDetails(type: MediaType, items: LibraryItem[] | undefined, settings: Settings | undefined) {
+  const qc = useQueryClient();
+  const missing = items?.filter(needsDetails) ?? [];
+  return useQuery({
+    queryKey: ["fill-details", type, missing.map((i) => i.id).join(",")],
+    enabled: missing.length > 0 && hasKeysFor(type, settings),
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      if (type === "movie") {
+        for (const item of missing) {
+          // one at a time with a short pause, to stay well under the shared server's per-minute limit
+          await new Promise((r) => setTimeout(r, 200));
+          try {
+            await saveDetails(item, await getMovieDetails(item.externalId, settings!.tmdbToken));
+          } catch (e) {
+            // "unknown" = e.g. the movie was removed from TMDB: skip it. Anything else
+            // (offline, bad key, rate limit) would fail for every movie, so stop.
+            if (!(e instanceof ApiError && e.kind === "unknown")) throw e;
+          }
+        }
+      } else {
+        const developers = await getGameDevelopers(missing.map((i) => i.externalId), igdbCredentials(settings));
+        for (const item of missing) await saveDetails(item, { developers: developers.get(item.externalId) ?? [] });
+      }
+      await qc.invalidateQueries({ queryKey: ["library", type] });
+      return true;
+    },
+  });
+}
+
 /** True when searching this media type is possible: own keys, or the shared server. */
 export function hasKeysFor(type: MediaType, settings: Settings | undefined) {
   return !!settings && (PROXY !== null || hasOwnKeys(type, settings));
+}
+
+/** The user's own IGDB keys, or null to use the shared server. */
+function igdbCredentials(settings: Settings | undefined): IgdbCredentials | null {
+  return hasOwnKeys("game", settings) ? { clientId: settings!.igdbClientId, clientSecret: settings!.igdbClientSecret } : null;
 }
 
 /** True when the user entered their own keys for this media type in Settings. */

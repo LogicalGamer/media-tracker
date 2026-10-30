@@ -8,16 +8,11 @@ import { Label } from "@/components/ui/label";
 import { saveFile } from "@/lib/save-file";
 import type { LibraryItem } from "@/lib/library";
 import type { ExportOptions } from "@/lib/export-pdf";
+import { SORT_OPTIONS } from "@/lib/filters";
 import type { MediaType } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
 type Props = { type: MediaType; items: LibraryItem[]; open: boolean; onOpenChange: (open: boolean) => void };
-
-const SORTS: { value: ExportOptions["sortBy"]; label: string }[] = [
-  { value: "added", label: "Date added" },
-  { value: "rating", label: "Your rating" },
-  { value: "title", label: "Title" },
-];
 
 export function ExportDialog({ type, items, open, onOpenChange }: Props) {
   const noun = type === "movie" ? "Movies" : "Games";
@@ -75,8 +70,8 @@ export function ExportDialog({ type, items, open, onOpenChange }: Props) {
 
           <div>
             <p className="text-xs text-muted-foreground">Sort by</p>
-            <div className="mt-1.5 flex gap-2">
-              {SORTS.map((o) => (
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {SORT_OPTIONS.map((o) => (
                 <Chip key={o.value} active={options.sortBy === o.value} onClick={() => set({ sortBy: o.value })}>
                   {o.label}
                 </Chip>
@@ -128,7 +123,7 @@ function Toggle({ checked, onChange, children }: { checked: boolean; onChange: (
       <span
         className={cn(
           "flex size-4.5 items-center justify-center rounded border transition-colors",
-          checked ? "border-foreground bg-foreground text-background" : "border-neutral-600",
+          checked ? "border-foreground bg-foreground text-background" : "border-muted-foreground/60",
         )}
       >
         {checked && <Check className="size-3.5" strokeWidth={3} />}

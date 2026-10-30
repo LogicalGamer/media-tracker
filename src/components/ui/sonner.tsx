@@ -1,11 +1,11 @@
 "use client"
 
-// TODO(theme toggle): read the theme from our own settings once light mode exists
 import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { useTheme } from "@/lib/theme"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const theme = "dark"
+  const [theme] = useTheme()
 
   return (
     <Sonner

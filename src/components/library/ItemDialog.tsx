@@ -51,6 +51,11 @@ function ItemDetails({ item, onRemoved }: { item: LibraryItem; onRemoved: () => 
           {item.extra.platforms && item.extra.platforms.length > 0 && (
             <p className="mt-1 text-xs text-muted-foreground/70">{item.extra.platforms.join(", ")}</p>
           )}
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <Credit label="Director" names={item.extra.directors} />
+            <Credit label="Composer" names={item.extra.composers} />
+            <Credit label="Developer" names={item.extra.developers} />
+          </dl>
         </div>
 
         <Section label="Status">
@@ -87,6 +92,17 @@ function ItemDetails({ item, onRemoved }: { item: LibraryItem; onRemoved: () => 
         </div>
       </div>
     </div>
+  );
+}
+
+/** One "Director: Name, Name" line; hidden when there are no names. */
+function Credit({ label, names }: { label: string; names?: string[] }) {
+  if (!names || names.length === 0) return null;
+  return (
+    <>
+      <dt className="text-[11px] leading-5 tracking-[0.2em] text-muted-foreground uppercase">{label}</dt>
+      <dd>{names.join(", ")}</dd>
+    </>
   );
 }
 
@@ -138,7 +154,7 @@ function RatingInput({ value, onChange }: { value: number | null; onChange: (v: 
               <Star
                 className={cn(
                   "size-5 transition-colors",
-                  n <= shown ? "fill-brand text-brand" : "text-neutral-700",
+                  n <= shown ? "fill-brand text-brand" : "text-foreground/20",
                 )}
               />
             </button>
