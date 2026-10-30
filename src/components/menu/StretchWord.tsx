@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { measureGlyph, type GlyphBox } from "@/lib/glyph-metrics";
@@ -26,6 +26,10 @@ const HOVER_SPEEDUP = 2.4;
 
 const FONT = '"Anton"';
 
+/** Animated value for one letter: vertical stretch progress (0..1). */
+type LetterState = { t: number };
+type Column = { x: number; w: number };
+
 type Props = {
   word: string;
   /** Speeds the animation up (used on hover). */
@@ -34,6 +38,34 @@ type Props = {
   introDelay?: number;
   className?: string;
 };
+
+/** Builds the SVG transform that stretches one glyph to fill the box (x, y, w, h). */
+function fitTransform(g: GlyphBox, x: number, y: number, w: number, h: number) {
+  return `translate(${x} ${y}) scale(${w / g.width} ${h / g.height}) translate(${g.left} ${g.ascent})`;
+}
+
+/** Places the letter columns side by side, separated by LETTER_GAP. */
+function computeColumns(baseWidths: number[]): Column[] {
+  let x = 0;
+  return baseWidths.map((w) => {
+    const col = { x, w };
+    x += w + LETTER_GAP;
+    return col;
+  });
+}
+
+/** The 3 transforms (top, middle, bottom copy) for letter `i`. */
+function letterTransforms(g: GlyphBox, i: number, col: Column, t: number) {
+  // Every other letter runs in the opposite direction, like the "I" in the reference.
+  const p = i % 2 ? 1 - t : t;
+  const h1 = LARGE + (SMALL - LARGE) * p;
+  const h3 = SMALL + (LARGE - SMALL) * p;
+  return [
+    fitTransform(g, col.x, 0, col.w, h1),
+    fitTransform(g, col.x, h1 + GAP, col.w, MID),
+    fitTransform(g, col.x, h1 + GAP + MID + GAP, col.w, h3),
+  ];
+}
 
 export function StretchWord({ word, fast = false, introDelay = 0, className }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -53,33 +85,16 @@ export function StretchWord({ word, fast = false, introDelay = 0, className }: P
     };
   }, [word]);
 
-  // x position and width of every letter column
-  const columns: { x: number; w: number }[] = [];
-  let totalWidth = 0;
-  glyphs?.forEach((g, i) => {
-    const w = (g.width / g.height) * WIDTH_REFERENCE_HEIGHT;
-    columns.push({ x: totalWidth, w });
-    totalWidth += w + (i < glyphs.length - 1 ? LETTER_GAP : 0);
-  });
+  const baseWidths = useMemo(
+    () => glyphs?.map((g) => (g.width / g.height) * WIDTH_REFERENCE_HEIGHT) ?? [],
+    [glyphs],
+  );
+  const columns = useMemo(() => computeColumns(baseWidths), [baseWidths]);
+  const totalWidth = baseWidths.reduce((a, b) => a + b, 0) + LETTER_GAP * (baseWidths.length - 1);
 
-  /** Builds the SVG transform that stretches one glyph to fill the box (x, y, w, h). */
-  const fitTransform = (g: GlyphBox, x: number, y: number, w: number, h: number) =>
-    `translate(${x} ${y}) scale(${w / g.width} ${h / g.height}) translate(${g.left} ${g.ascent})`;
-
-  /** Lays out the 3 copies of letter `i` for progress `t` (0..1). */
-  const layoutLetter = (i: number, t: number) => {
-    if (!glyphs) return [];
-    // Every other letter runs in the opposite direction, like the "I" in the reference.
-    const p = i % 2 ? 1 - t : t;
-    const h1 = LARGE + (SMALL - LARGE) * p;
-    const h3 = SMALL + (LARGE - SMALL) * p;
-    const { x, w } = columns[i];
-    return [
-      fitTransform(glyphs[i], x, 0, w, h1),
-      fitTransform(glyphs[i], x, h1 + GAP, w, MID),
-      fitTransform(glyphs[i], x, h1 + GAP + MID + GAP, w, h3),
-    ];
-  };
+  // One mutable state object per letter. GSAP animates these numbers and a
+  // per-frame callback turns them into SVG transforms (no React re-renders).
+  const states = useMemo<LetterState[]>(() => baseWidths.map(() => ({ t: 0.5 })), [baseWidths]);
 
   useGSAP(
     () => {
@@ -96,28 +111,34 @@ export function StretchWord({ word, fast = false, introDelay = 0, className }: P
         delay: introDelay,
       });
 
-      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      // Every frame: turn the animated numbers into transforms and write them to the DOM.
+      const render = () => {
+        glyphs.forEach((g, i) =>
+          letterTransforms(g, i, columns[i], states[i].t).forEach((tf, k) =>
+            textRefs.current[i][k]?.setAttribute("transform", tf),
+          ),
+        );
+      };
+      gsap.ticker.add(render);
 
-      // Loop: animate a plain number from 0 to 1 and back, and on every frame
-      // write the new transforms straight to the DOM (no React re-render).
-      tweens.current = glyphs.map((_, i) => {
-        const state = { t: 0 };
-        const tween = gsap.to(state, {
-          t: 1,
-          duration: 2.5,
-          ease: "power1.inOut",
-          repeat: -1,
-          yoyo: true,
-          onUpdate: () => {
-            layoutLetter(i, state.t).forEach((tf, k) =>
-              textRefs.current[i][k]?.setAttribute("transform", tf),
-            );
-          },
+      if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        // Loop: animate each letter's `t` from 0 to 1 and back forever.
+        tweens.current = states.map((state, i) => {
+          state.t = 0;
+          const tween = gsap.to(state, {
+            t: 1,
+            duration: 2.5,
+            ease: "power1.inOut",
+            repeat: -1,
+            yoyo: true,
+          });
+          tween.timeScale(SPEEDS[i % SPEEDS.length]);
+          tween.seek(PHASES[i % PHASES.length]);
+          return tween;
         });
-        tween.timeScale(SPEEDS[i % SPEEDS.length]);
-        tween.seek(PHASES[i % PHASES.length]);
-        return tween;
-      });
+      }
+
+      return () => gsap.ticker.remove(render);
     },
     { scope: svgRef, dependencies: [glyphs] },
   );
@@ -140,11 +161,11 @@ export function StretchWord({ word, fast = false, introDelay = 0, className }: P
       fill="currentColor"
       aria-hidden
     >
-      {glyphs.map((_, i) => {
+      {glyphs.map((g, i) => {
         textRefs.current[i] ??= [];
         return (
           <g key={i} className="stretch-letter">
-            {layoutLetter(i, 0.5).map((tf, k) => (
+            {letterTransforms(g, i, columns[i], states[i].t).map((tf, k) => (
               <text
                 key={k}
                 ref={(el) => {

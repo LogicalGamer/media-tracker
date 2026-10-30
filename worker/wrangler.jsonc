@@ -1,0 +1,10 @@
+{
+  // Cloudflare Worker config. Deploy with: npm run deploy
+  // Secrets (TMDB_TOKEN, IGDB_CLIENT_ID, IGDB_CLIENT_SECRET, APP_KEY) are set
+  // with `npx wrangler secret put <NAME>` and never stored in this file.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "media-tracker-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true }
+}

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router";
+import { Link, useNavigate } from "react-router";
+import { Settings } from "lucide-react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { StretchWord } from "@/components/menu/StretchWord";
@@ -16,6 +17,9 @@ export function OpeningMenu() {
   const navigate = useNavigate();
   const rootRef = useRef<HTMLElement>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  // wordBoxes = untransformed boxes we measure; wordInners = the parts we stretch
+  const wordBoxes = useRef<(HTMLDivElement | null)[]>([]);
+  const wordInners = useRef<(HTMLDivElement | null)[]>([]);
   const [active, setActive] = useState<Option["id"] | null>(null);
   const leaving = useRef(false);
 
@@ -26,6 +30,28 @@ export function OpeningMenu() {
     },
     { scope: rootRef },
   );
+
+  // Hover: stretch the active word sideways until it fully covers the other one.
+  // MOVIES grows from its left edge to the right, GAMES from its right edge to the left.
+  useEffect(() => {
+    const boxes = wordBoxes.current.map((el) => el!.getBoundingClientRect());
+    OPTIONS.forEach((o, i) => {
+      let scaleX = 1;
+      if (o.id === active) {
+        const mine = boxes[i];
+        const other = boxes[1 - i];
+        const reach = i === 0 ? other.right - mine.left : mine.right - other.left;
+        scaleX = reach / mine.width;
+      }
+      gsap.to(wordInners.current[i], {
+        scaleX,
+        transformOrigin: i === 0 ? "left center" : "right center",
+        duration: 0.9,
+        ease: "expo.out",
+        overwrite: "auto",
+      });
+    });
+  }, [active]);
 
   /** Plays the exit animation, then switches to the chosen section. */
   const choose = (id: Option["id"]) => {
@@ -61,7 +87,12 @@ export function OpeningMenu() {
     <main ref={rootRef} className="relative flex h-svh flex-col overflow-hidden bg-background select-none">
       <header className="menu-fade flex items-center justify-between px-10 pt-8 text-xs tracking-[0.3em] text-muted-foreground uppercase">
         <span>Media Tracker</span>
-        <span className="hidden sm:inline">Choose your library</span>
+        <span className="flex items-center gap-5">
+          <span className="hidden sm:inline">Choose your library</span>
+          <Link to="/settings" aria-label="Settings" className="transition-colors hover:text-foreground">
+            <Settings className="size-4" />
+          </Link>
+        </span>
       </header>
 
       <nav className="flex flex-1 items-center justify-center gap-[7vw] px-10">
@@ -83,8 +114,9 @@ export function OpeningMenu() {
               className={cn(
                 "group relative flex flex-col items-center gap-6 outline-none",
                 "text-neutral-200 transition-colors duration-500 ease-out",
-                isActive && "text-brand",
-                isDimmed && "text-neutral-800",
+                // the active word sits in front so it can cover the other one
+                isActive && "z-10 text-brand",
+                isDimmed && "text-neutral-900",
               )}
             >
               {/* Soft glow behind the hovered word */}
@@ -94,12 +126,26 @@ export function OpeningMenu() {
                   isActive ? "opacity-100" : "opacity-0",
                 )}
               />
-              <StretchWord
-                word={o.word}
-                fast={isActive}
-                introDelay={0.15 + i * 0.25}
-                className="h-[52vh] w-auto max-w-[40vw]"
-              />
+              <div
+                ref={(el) => {
+                  wordBoxes.current[i] = el;
+                }}
+              >
+                {/* pointer-events-none: the stretched word must not block hovering the other option */}
+                <div
+                  ref={(el) => {
+                    wordInners.current[i] = el;
+                  }}
+                  className="pointer-events-none"
+                >
+                  <StretchWord
+                    word={o.word}
+                    fast={isActive}
+                    introDelay={0.15 + i * 0.25}
+                    className="block h-[52vh] w-auto max-w-[40vw]"
+                  />
+                </div>
+              </div>
               <span className="menu-fade flex items-center gap-3 text-sm tracking-[0.25em] uppercase">
                 <kbd className="rounded border border-current/30 px-1.5 py-0.5 font-mono text-[10px] tracking-normal opacity-60">
                   {o.key}

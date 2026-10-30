@@ -2,9 +2,23 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
-    "opener:default"
+    "opener:default",
+    "store:default",
+    "sql:default",
+    "sql:allow-execute",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "https://api.themoviedb.org/*" },
+        { "url": "https://id.twitch.tv/*" },
+        { "url": "https://api.igdb.com/*" },
+        { "url": "https://*.workers.dev/*" }
+      ]
+    }
   ]
 }
